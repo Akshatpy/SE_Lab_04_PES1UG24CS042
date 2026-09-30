@@ -97,34 +97,50 @@ class GameEngine:
             self.finish_time_ms = elapsed
 
     def _resolve_wall_collisions(self):
+        m = self.marble
         for wall in self.walls:
-            marble_rect = self.marble.rect()
-            wall_rect = wall.rect()
+            rect = wall.rect()
 
-            # NOTE: this checks a simple bounding-box overlap
-            # (colliderect) between the marble's square bounding box
-            # and the wall, instead of a true circle-vs-rectangle
-            # distance test. Near a wall's corner, the marble's
-            # bounding square can overlap the wall rect well before
-            # the actual round marble visually touches it, causing an
-            # early "phantom" bounce off empty space right next to
-            # corners. See Task 1 in the README.
-            if marble_rect.colliderect(wall_rect):
-                overlap_x = min(marble_rect.right, wall_rect.right) - max(marble_rect.left, wall_rect.left)
-                overlap_y = min(marble_rect.bottom, wall_rect.bottom) - max(marble_rect.top, wall_rect.top)
+            # closest point on the wall rect to the marble's centre
+            cx = max(rect.left, min(m.x, rect.right))
+            cy = max(rect.top, min(m.y, rect.bottom))
+            dx = m.x - cx
+            dy = m.y - cy
+            dist_sq = dx * dx + dy * dy
 
-                if overlap_x < overlap_y:
-                    if self.marble.x < wall_rect.centerx:
-                        self.marble.x -= overlap_x
-                    else:
-                        self.marble.x += overlap_x
-                    self.marble.vx *= -0.3
+            if dist_sq >= m.radius ** 2:
+                continue
+
+            if dist_sq > 0:
+                dist = dist_sq ** 0.5
+                nx, ny = dx / dist, dy / dist
+                penetration = m.radius - dist
+            else:
+                # centre is inside the wall, push out through the nearest side
+                left = m.x - rect.left
+                right = rect.right - m.x
+                top = m.y - rect.top
+                bottom = rect.bottom - m.y
+                smallest = min(left, right, top, bottom)
+                if smallest == left:
+                    nx, ny = -1, 0
+                elif smallest == right:
+                    nx, ny = 1, 0
+                elif smallest == top:
+                    nx, ny = 0, -1
                 else:
-                    if self.marble.y < wall_rect.centery:
-                        self.marble.y -= overlap_y
-                    else:
-                        self.marble.y += overlap_y
-                    self.marble.vy *= -0.3
+                    nx, ny = 0, 1
+                penetration = smallest + m.radius
+
+            m.x += nx * penetration
+            m.y += ny * penetration
+
+            # only bounce if we're moving into the wall
+            vn = m.vx * nx + m.vy * ny
+            if vn < 0:
+                # remove the normal part and add back 0.3 of it reversed
+                m.vx -= (1 + 0.3) * vn * nx
+                m.vy -= (1 + 0.3) * vn * ny
 
     def render(self, screen):
         screen.fill(DARK)
