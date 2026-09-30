@@ -9,28 +9,54 @@ DARK = (40, 40, 50)
 WALL_COLOR = (90, 90, 110)
 GOAL_COLOR = (60, 200, 120)
 
+# tilt strength, friction and time limit for each difficulty
+DIFFICULTIES = {
+    "Easy":   {"tilt": 0.8, "friction": 0.03, "time_ms": 60000},
+    "Medium": {"tilt": 0.6, "friction": 0.02, "time_ms": 45000},
+    "Hard":   {"tilt": 0.45, "friction": 0.01, "time_ms": 30000},
+}
+DIFFICULTY_ORDER = ["Easy", "Medium", "Hard"]
+
+
 class GameEngine:
     def __init__(self, width, height):
         self.width = width
         self.height = height
 
         self.marble = Marble(50, 50)
-        self.tilt_strength = 0.6
-        self.friction = 0.02
         self.max_speed = 9
 
         self.walls = self._build_maze()
         self.goal_x, self.goal_y, self.goal_radius = width - 60, height - 60, 22
 
-        self.time_limit_ms = 45000
-        self.start_ticks = pygame.time.get_ticks()
+        self.difficulty = "Medium"
+        self.state = "menu"  # "menu" or "playing"
+        self.start_round(self.difficulty)
+        self.state = "menu"
 
         self.font = pygame.font.SysFont("Arial", 26)
         self.big_font = pygame.font.SysFont("Arial", 48, bold=True)
         self.small_font = pygame.font.SysFont("Arial", 20)
+
+    def start_round(self, difficulty):
+        settings = DIFFICULTIES[difficulty]
+        self.difficulty = difficulty
+        self.tilt_strength = settings["tilt"]
+        self.friction = settings["friction"]
+        self.time_limit_ms = settings["time_ms"]
+
+        self.marble = Marble(50, 50)
+        self.start_ticks = pygame.time.get_ticks()
         self.game_over = False
         self.result = None  # "solved" or "timeout"
         self.finish_time_ms = None
+        self.state = "playing"
+
+    def _menu_button_rects(self):
+        rects = []
+        for i in range(len(DIFFICULTY_ORDER)):
+            rects.append(pygame.Rect(self.width // 2 - 110, 200 + i * 65, 220, 50))
+        return rects
 
     def _build_maze(self):
         walls = []
@@ -51,13 +77,24 @@ class GameEngine:
 
     def handle_event(self, event):
         # movement is driven by the mouse position in handle_input,
-        # events are only used for the end screen
-        if self.game_over and event.type == pygame.KEYDOWN:
+        # events are only used for the menu and the end screen
+        if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
                 pygame.event.post(pygame.event.Event(pygame.QUIT))
+            elif self.state == "menu":
+                keys = {pygame.K_1: 0, pygame.K_2: 1, pygame.K_3: 2}
+                if event.key in keys:
+                    self.start_round(DIFFICULTY_ORDER[keys[event.key]])
+            elif self.game_over and event.key in (pygame.K_r, pygame.K_RETURN):
+                self.state = "menu"
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.state == "menu":
+                for name, rect in zip(DIFFICULTY_ORDER, self._menu_button_rects()):
+                    if rect.collidepoint(event.pos):
+                        self.start_round(name)
 
     def handle_input(self):
-        if self.game_over:
+        if self.state != "playing" or self.game_over:
             return
 
         mouse_x, mouse_y = pygame.mouse.get_pos()
@@ -70,7 +107,7 @@ class GameEngine:
         self.marble.vy += ay
 
     def update(self):
-        if self.game_over:
+        if self.state != "playing" or self.game_over:
             return
 
         elapsed = pygame.time.get_ticks() - self.start_ticks
@@ -146,7 +183,29 @@ class GameEngine:
                 m.vx -= (1 + 0.3) * vn * nx
                 m.vy -= (1 + 0.3) * vn * ny
 
+    def _render_menu(self, screen):
+        screen.fill(DARK)
+        title = self.big_font.render("Marble Tilt Maze", True, WHITE)
+        screen.blit(title, title.get_rect(center=(self.width // 2, 100)))
+        sub = self.small_font.render("Pick a difficulty (click or press 1/2/3)", True, WHITE)
+        screen.blit(sub, sub.get_rect(center=(self.width // 2, 160)))
+
+        mouse = pygame.mouse.get_pos()
+        for i, (name, rect) in enumerate(zip(DIFFICULTY_ORDER, self._menu_button_rects())):
+            hover = rect.collidepoint(mouse)
+            pygame.draw.rect(screen, (110, 110, 140) if hover else WALL_COLOR, rect, border_radius=8)
+            info = DIFFICULTIES[name]
+            label = self.font.render(f"{i + 1}. {name}  ({info['time_ms'] // 1000}s)", True, WHITE)
+            screen.blit(label, label.get_rect(center=rect.center))
+
+        esc = self.small_font.render("ESC to quit", True, WHITE)
+        screen.blit(esc, esc.get_rect(center=(self.width // 2, self.height - 30)))
+
     def render(self, screen):
+        if self.state == "menu":
+            self._render_menu(screen)
+            return
+
         screen.fill(DARK)
 
         for wall in self.walls:
@@ -180,7 +239,7 @@ class GameEngine:
         lines = [
             (self.big_font, title, color, self.height // 2 - 60),
             (self.font, detail, WHITE, self.height // 2),
-            (self.small_font, "Press ESC to quit", WHITE, self.height // 2 + 60),
+            (self.small_font, "Press R or ENTER to play again, ESC to quit", WHITE, self.height // 2 + 60),
         ]
         for font, text, col, y in lines:
             surf = font.render(text, True, col)
